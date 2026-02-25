@@ -154,6 +154,10 @@ class HSVKalmanTracker:
 
         found = self._find_largest_blob(mask)
 
+        # Track consecutive misses for quality indication
+        if not hasattr(self, 'miss_count'):
+            self.miss_count = 0
+
         if found is not None:
             (cx, cy), contour = found
 
@@ -169,11 +173,17 @@ class HSVKalmanTracker:
                 self.initialized = True
             else:
                 self.kf.correct(meas)
+            
+            self.miss_count = 0
+        else:
+            self.miss_count += 1
 
         est = self.kf.statePost
         est_x, est_y = int(est[0]), int(est[1])
 
-        self.trail.append((est_x, est_y))
+        # Only update trail and return position if we have recent detections
+        if self.miss_count < 5:
+            self.trail.append((est_x, est_y))
 
         # draw trail
         for i in range(1, len(self.trail)):
@@ -196,8 +206,8 @@ class HSVKalmanTracker:
         cv2.imshow("Mask", mask)
         cv2.waitKey(1)
 
-        # RETURN FILTERED POSITION
-        if self.initialized:
+        # RETURN FILTERED POSITION only if tracking quality is acceptable
+        if self.initialized and self.miss_count < 5:
             return (est_x, est_y)
 
         return None

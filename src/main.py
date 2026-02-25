@@ -28,6 +28,9 @@ def camera_to_grid(px, py, frame_w, frame_h):
 
     return (row, col)
 
+def manhattan(a, b):
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
 def main():
     pygame.init()
 
@@ -61,18 +64,23 @@ def main():
     # ----------------------------------
     tracker = HSVKalmanTracker()
 
-    last_goal = goal
-    replan_cooldown = 0
-
     nodes_expanded = 0
-    global last_plan_nodes
     last_plan_nodes = 0
 
     # Behavior filtering: require stability before replanning
-    goal_candidate = None
-    candidate_count = 0
     STABILITY_FRAMES = 5
-    DEADZONE_RADIUS = 1  # cells
+    REPLAN_COOLDOWN_FRAMES = 6        # minimum time between replans
+    MIN_GOAL_CELL_DELTA = 2           # ignore tiny goal changes
+    MIN_PATH_PROGRESS_STEPS = 6       # commit to current path for a bit
+    MAX_REPLANS_PER_SECOND = 3
+
+    last_goal = goal
+    stable_goal = None
+    stable_count = 0
+    replan_cooldown = 0
+    replans_in_window = 0
+    window_start_ms = pygame.time.get_ticks()
+    last_goal_change_ms = pygame.time.get_ticks()
 
     running = True
 
@@ -97,17 +105,27 @@ def main():
                     planner.reset(robot.grid_pos(), goal)
                     nodes_expanded = 0
                     last_goal = goal
-                    goal_candidate = None
-                    candidate_count = 0
+                    # Reset stability state
+                    stable_goal = None
+                    stable_count = 0
+                    # Reset rate limiting
+                    replans_in_window = 0
+                    window_start_ms = pygame.time.get_ticks()
                 elif event.key == pygame.K_c:
                     # clear tracker selection (re-pick color)
                     tracker.lower_hsv = None
                     tracker.upper_hsv = None
                     tracker.initialized = False
                     tracker.trail.clear()
+                    if hasattr(tracker, 'miss_count'):
+                        tracker.miss_count = 0
                     replan_cooldown = 0
-                    goal_candidate = None
-                    candidate_count = 0
+                    # Reset stability state
+                    stable_goal = None
+                    stable_count = 0
+                    # Reset rate limiting
+                    replans_in_window = 0
+                    window_start_ms = pygame.time.get_ticks()
 
         # ------------------------------
         # VISION UPDATE (OpenCV) + behavior filtering
@@ -127,37 +145,102 @@ def main():
                 tracker.frame_h
             )
 
-            # Only accept free cells
+            # # Only accept free cells
+            # if grid.grid[new_goal[0]][new_goal[1]] == 0:
+
+            #     # DEADZONE: treat small moves near last_goal as unchanged
+            #     dist = abs(new_goal[0] - last_goal[0]) + abs(new_goal[1] - last_goal[1])
+            #     if dist <= DEADZONE_RADIUS:
+            #         # inside deadzone -> reset candidate and keep current goal
+            #         goal_candidate = None
+            #         candidate_count = 0
+            #     else:
+            #         # New candidate observed
+            #         if goal_candidate != new_goal:
+            #             goal_candidate = new_goal
+            #             candidate_count = 1
+            #         else:
+            #             candidate_count += 1
+
+            #         # If candidate persisted long enough and cooldown passed, accept
+            #         if candidate_count >= STABILITY_FRAMES and replan_cooldown <= 0:
+            #             start_now = robot.grid_pos()
+
+            #             planner.reset(start_now, new_goal)
+            #             robot.clear_path()
+            #             nodes_expanded = 0
+
+            #             last_goal = new_goal
+            #             goal = new_goal
+
+            #             replan_cooldown = 2
+            #             goal_candidate = None
+            #             candidate_count = 0
+            now_ms = pygame.time.get_ticks()
+
+            # rolling 1-second budget window
+            if now_ms - window_start_ms >= 1000:
+                window_start_ms = now_ms
+                replans_in_window = 0
+
             if grid.grid[new_goal[0]][new_goal[1]] == 0:
-
-                # DEADZONE: treat small moves near last_goal as unchanged
-                dist = abs(new_goal[0] - last_goal[0]) + abs(new_goal[1] - last_goal[1])
-                if dist <= DEADZONE_RADIUS:
-                    # inside deadzone -> reset candidate and keep current goal
-                    goal_candidate = None
-                    candidate_count = 0
+                # goal stability (temporal smoothing)
+                if stable_goal == new_goal:
+                    stable_count += 1
                 else:
-                    # New candidate observed
-                    if goal_candidate != new_goal:
-                        goal_candidate = new_goal
-                        candidate_count = 1
-                    else:
-                        candidate_count += 1
+                    stable_goal = new_goal
+                    stable_count = 0
+                    last_goal_change_ms = now_ms
 
-                    # If candidate persisted long enough and cooldown passed, accept
-                    if candidate_count >= STABILITY_FRAMES and replan_cooldown <= 0:
-                        start_now = robot.grid_pos()
+                # ignore tiny goal motion (deadzone)
+                goal_moved_enough = manhattan(new_goal, last_goal) >= MIN_GOAL_CELL_DELTA
 
-                        planner.reset(start_now, new_goal)
-                        robot.clear_path()
-                        nodes_expanded = 0
+                # path commitment (hysteresis): don't abandon path instantly
+                # BUT: if goal moved significantly, prioritize responsiveness over commitment
+                progressed_enough = (robot.step_index >= MIN_PATH_PROGRESS_STEPS) or (not robot.path)
 
-                        last_goal = new_goal
-                        goal = new_goal
+                # also allow replanning if planner already failed (no path) and goal changed
+                planner_failed = (planner.finished and planner.path is None)
 
-                        replan_cooldown = 2
-                        goal_candidate = None
-                        candidate_count = 0
+                can_replan = (
+                    stable_count >= STABILITY_FRAMES
+                    and goal_moved_enough
+                    and replan_cooldown == 0
+                    and replans_in_window < MAX_REPLANS_PER_SECOND
+                    and (progressed_enough or goal_moved_enough)  # either condition works
+                )
+
+                # If planner failed, relax the "progress" requirement so you can recover
+                if planner_failed and stable_count >= STABILITY_FRAMES and goal_moved_enough:
+                    can_replan = can_replan or (
+                        replan_cooldown == 0 and replans_in_window < MAX_REPLANS_PER_SECOND
+                    )
+
+                # Debug: show which conditions are blocking replan
+                if stable_count >= STABILITY_FRAMES and goal_moved_enough and not can_replan:
+                    blockers = []
+                    if replan_cooldown > 0:
+                        blockers.append(f"cooldown({replan_cooldown})")
+                    if replans_in_window >= MAX_REPLANS_PER_SECOND:
+                        blockers.append("rate_limit")
+                    print(f"[REPLAN BLOCKED] {', '.join(blockers)}")
+
+                if can_replan:
+                    start_now = robot.grid_pos()
+
+                    planner.reset(start_now, new_goal)
+                    robot.clear_path()
+
+                    last_goal = new_goal
+                    goal = new_goal
+
+                    replan_cooldown = REPLAN_COOLDOWN_FRAMES
+                    replans_in_window += 1
+
+        else:
+            # Target lost - reset stability state
+            stable_goal = None
+            stable_count = 0
 
         if replan_cooldown > 0:
             replan_cooldown -= 1
@@ -228,6 +311,7 @@ def main():
             f"Planner: {'RUNNING' if not planner.finished else ('FOUND' if planner.path else 'NO PATH')}",
             f"Closed-set (expanded): {len(planner.closed_set)}",
             f"Last plan expanded: {last_plan_nodes}",
+            f"Replans/s: {replans_in_window}/{MAX_REPLANS_PER_SECOND}",
         ]
         y = 8
         for line in lines:
@@ -235,27 +319,33 @@ def main():
             screen.blit(surf, (8, y))
             y += 18
 
-        # Candidate visual indicator & stability counter
-        if goal_candidate is not None:
-            cr, cc = goal_candidate
-            cand_rect = pygame.Rect(
-                cc * CELL_SIZE,
-                cr * CELL_SIZE,
+        # Stable goal visual indicator & stability counter
+        if stable_goal is not None:
+            sr, sc = stable_goal
+            stable_rect = pygame.Rect(
+                sc * CELL_SIZE,
+                sr * CELL_SIZE,
                 CELL_SIZE,
                 CELL_SIZE,
             )
-            pygame.draw.rect(screen, MAGENTA, cand_rect, 3)
+            pygame.draw.rect(screen, MAGENTA, stable_rect, 3)
 
-            # draw stability text near top-left of candidate cell
-            text = f"{candidate_count}/{STABILITY_FRAMES}"
+            # draw stability text near top-left of stable cell
+            text = f"{stable_count}/{STABILITY_FRAMES}"
             surf = font.render(text, True, MAGENTA)
-            screen.blit(surf, (cc * CELL_SIZE + 4, cr * CELL_SIZE + 4))
+            screen.blit(surf, (sc * CELL_SIZE + 4, sr * CELL_SIZE + 4))
 
-        # show message when candidate pending
-        if goal_candidate is not None:
-            info = "Candidate goal pending"
+        # show message when stable goal pending
+        if stable_goal is not None and stable_count < STABILITY_FRAMES:
+            info = "Stable goal pending"
             info_surf = font.render(info, True, (50, 50, 50))
-            screen.blit(info_surf, (8, 8))
+            screen.blit(info_surf, (8, 100))
+
+        # show message when target lost
+        if target is None:
+            info = "TARGET LOST"
+            info_surf = font.render(info, True, (255, 0, 0))
+            screen.blit(info_surf, (8, 100))
 
         pygame.display.flip()
 
