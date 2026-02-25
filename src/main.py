@@ -35,7 +35,7 @@ def main():
     pygame.init()
 
     # UI font for indicators
-    font = pygame.font.SysFont(None, 20)
+    font = pygame.font.SysFont(None, 22)
 
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Vision-Guided Navigation")
@@ -315,7 +315,8 @@ def main():
         ]
         y = 8
         for line in lines:
-            surf = font.render(line, True, (0, 0, 0))
+            # Yellow with slight shadow for readability against any background
+            surf = font.render(line, True, (255, 220, 0))
             screen.blit(surf, (8, y))
             y += 18
 
@@ -332,13 +333,13 @@ def main():
 
             # draw stability text near top-left of stable cell
             text = f"{stable_count}/{STABILITY_FRAMES}"
-            surf = font.render(text, True, MAGENTA)
+            surf = font.render(text, True, (255, 255, 255))  # White for readability
             screen.blit(surf, (sc * CELL_SIZE + 4, sr * CELL_SIZE + 4))
 
         # show message when stable goal pending
         if stable_goal is not None and stable_count < STABILITY_FRAMES:
             info = "Stable goal pending"
-            info_surf = font.render(info, True, (50, 50, 50))
+            info_surf = font.render(info, True, (255, 165, 0))  # Orange for visibility
             screen.blit(info_surf, (8, 100))
 
         # show message when target lost
