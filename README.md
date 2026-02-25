@@ -114,3 +114,60 @@ python main.py
 - Multi-target tracking
 - Costmap-based planning instead of binary grid
 - Predictive goal following using Kalman velocity
+
+## Version 0.1.1 -- Visual Debugging & Demo Polish
+This update focuses on improving visual clarity, algorithm transparency, and overall presentation quality for real-time robotics demonstrations.
+
+The goal of this version is to make system behavior immediately understandable to observers by visualizing internal state and motion history.
+
+1. Motion Trail Visualization
+Two trajectory trails were added:
+
+### Perception Trail (OpenCV)
+- Displays the recent filtered positions from the Kalman tracker.
+- Visualizes tracking stability over time.
+- Helps observe sensor noise vs filtered motion.
+
+This makes it easier to see:
+- smoothing effects
+- estimation consistency
+- object motion patterns
+
+### Robot Trail (Pygame)
+- Stores and renders recent robot positions.
+- Shows actual navigation history.
+
+This provides:
+- clearer understanding of path execution
+- visibility into replanning behavior
+- demonstration of motion smoothness
+
+2. Real-Time Planning HUD
+A lightweight HUD overlay was added to display planner metrics during execution.
+
+### Displayed information:
+- Current navigation goal
+- Planner state (RUNNING / FOUND / NO PATH)
+- Nodes expanded during search
+- Nodes expanded in last completed plan
+
+Purpose:
+- expose algorithm internals visually
+- improve debugging and analysis
+- mimic robotics research visualization tools
+
+3. Goal Crosshair Visualization
+A high-visibility crosshair now marks the current navigation target.
+
+This directly illustrates:
+Camera Tracking → Grid Mapping → Navigation Goal
+
+### Benefits:
+- immediate understanding of perception→planning link
+- easier debugging of coordinate conversion
+- clearer demo communication
+
+## Version 0.1.2 -- Replanning Hysteresis & Budgeted Control Loop
+- Introduced decision-level stability mechanisms to reduce replanning thrash in dynamic target tracking.
+- Added deadzone thresholds, minimum path commitment, cooldown, and replanning rate budget (replans/sec) to produce smoother and more realistic autonomous behavior.
+- Improved robustness when planner temporarily fails (unreachable goals).
