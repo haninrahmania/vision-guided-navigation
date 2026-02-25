@@ -333,7 +333,7 @@ def main():
 
             # draw stability text near top-left of stable cell
             text = f"{stable_count}/{STABILITY_FRAMES}"
-            surf = font.render(text, True, (255, 255, 255))  # White for readability
+            surf = font.render(text, True, (0, 0, 0))  # Black for contrast on magenta
             screen.blit(surf, (sc * CELL_SIZE + 4, sr * CELL_SIZE + 4))
 
         # show message when stable goal pending
