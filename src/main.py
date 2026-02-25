@@ -63,6 +63,11 @@ def main():
 
     last_goal = goal
     replan_cooldown = 0
+
+    nodes_expanded = 0
+    global last_plan_nodes
+    last_plan_nodes = 0
+
     # Behavior filtering: require stability before replanning
     goal_candidate = None
     candidate_count = 0
@@ -84,6 +89,25 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    # reset trails + replan to current goal
+                    robot.clear_path()
+                    planner.reset(robot.grid_pos(), goal)
+                    nodes_expanded = 0
+                    last_goal = goal
+                    goal_candidate = None
+                    candidate_count = 0
+                elif event.key == pygame.K_c:
+                    # clear tracker selection (re-pick color)
+                    tracker.lower_hsv = None
+                    tracker.upper_hsv = None
+                    tracker.initialized = False
+                    tracker.trail.clear()
+                    replan_cooldown = 0
+                    goal_candidate = None
+                    candidate_count = 0
 
         # ------------------------------
         # VISION UPDATE (OpenCV) + behavior filtering
@@ -126,6 +150,7 @@ def main():
 
                         planner.reset(start_now, new_goal)
                         robot.clear_path()
+                        nodes_expanded = 0
 
                         last_goal = new_goal
                         goal = new_goal
@@ -142,9 +167,13 @@ def main():
         # ------------------------------
         if not planner.finished:
             planner.step()
+            nodes_expanded = len(planner.closed_set)
 
-        elif planner.path and not robot.path:
-            robot.set_path(planner.path)
+        elif planner.finished:
+            last_plan_nodes = nodes_expanded
+
+            if planner.path and not robot.path:
+                robot.set_path(planner.path)
 
         # ------------------------------
         # ROBOT UPDATE
@@ -181,11 +210,30 @@ def main():
             CELL_SIZE
         )
         pygame.draw.rect(screen, CYAN, goal_rect, 3)
+        gr, gc = goal
+        cx = gc * CELL_SIZE + CELL_SIZE // 2
+        cy = gr * CELL_SIZE + CELL_SIZE // 2
+        size = CELL_SIZE // 2
+        pygame.draw.line(screen, (0, 200, 255), (cx - size, cy), (cx + size, cy), 3)
+        pygame.draw.line(screen, (0, 200, 255), (cx, cy - size), (cx, cy + size), 3)
 
         if planner.path:
             robot.draw_path(screen)
 
+        robot.draw_trail(screen)
         robot.draw(screen)
+
+        lines = [
+            f"Goal: {goal}",
+            f"Planner: {'RUNNING' if not planner.finished else ('FOUND' if planner.path else 'NO PATH')}",
+            f"Closed-set (expanded): {len(planner.closed_set)}",
+            f"Last plan expanded: {last_plan_nodes}",
+        ]
+        y = 8
+        for line in lines:
+            surf = font.render(line, True, (0, 0, 0))
+            screen.blit(surf, (8, y))
+            y += 18
 
         # Candidate visual indicator & stability counter
         if goal_candidate is not None:

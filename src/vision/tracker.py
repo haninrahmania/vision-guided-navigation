@@ -1,13 +1,15 @@
 from typing import Optional
 import cv2
 import numpy as np
-
+from collections import deque
 
 class HSVKalmanTracker:
     def __init__(self, camera_index: int = 0):
         self.cap = cv2.VideoCapture(camera_index)
         if not self.cap.isOpened():
             raise RuntimeError("Could not open webcam.")
+        
+        self.trail = deque(maxlen=30)
 
         # HSV selection
         self.lower_hsv: Optional[np.ndarray] = None
@@ -170,6 +172,12 @@ class HSVKalmanTracker:
 
         est = self.kf.statePost
         est_x, est_y = int(est[0]), int(est[1])
+
+        self.trail.append((est_x, est_y))
+
+        # draw trail
+        for i in range(1, len(self.trail)):
+            cv2.line(frame, self.trail[i-1], self.trail[i], (0, 255, 0), 2)
 
         cv2.circle(frame, (pred_x, pred_y), 6, (255, 0, 0), -1)
         cv2.circle(frame, (est_x, est_y), 6, (0, 255, 0), -1)

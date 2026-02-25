@@ -11,6 +11,9 @@ class Robot:
         self.path = []
         self.step_index = 0
 
+        self.trail = []
+        self.trail_max = 60
+
     def set_path(self, path):
         self.path = path
         self.step_index = 0
@@ -25,7 +28,20 @@ class Robot:
     def update(self):
         if self.path and self.step_index < len(self.path):
             self.position = self.path[self.step_index]
+            self.trail.append(self.position)
+            if len(self.trail) > self.trail_max:
+                self.trail.pop(0)
             self.step_index += 1
+
+    def draw_trail(self, screen):
+        for (r, c) in self.trail:
+            rect = pygame.Rect(
+                c * self.cell_size + self.cell_size // 4,
+                r * self.cell_size + self.cell_size // 4,
+                self.cell_size // 2,
+                self.cell_size // 2
+            )
+            pygame.draw.rect(screen, (0, 0, 0), rect, 1)
 
     def draw(self, screen):
         r, c = self.position
