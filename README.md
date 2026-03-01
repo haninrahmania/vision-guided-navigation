@@ -172,7 +172,7 @@ Camera Tracking → Grid Mapping → Navigation Goal
 - Added deadzone thresholds, minimum path commitment, cooldown, and replanning rate budget (replans/sec) to produce smoother and more realistic autonomous behavior.
 - Improved robustness when planner temporarily fails (unreachable goals).
 
-## Version 1.2.0 -- ArUco Marker Following (Closed-Loop Control)
+## Version 0.2.0 -- ArUco Marker Following (Closed-Loop Control)
 This version introduces a complete **perception → control** pipeline using ArUco marker detection for closed-loop robot following behavior.
 
 ### Closed-Loop ArUco Follow Behavior
