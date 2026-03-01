@@ -14,6 +14,10 @@ WINDOW = "ArUco Tracking"
 
 ARUCO_DICT = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 ARUCO_PARAMS = cv2.aruco.DetectorParameters()
+ARUCO_PARAMS.adaptiveThreshWinSizeMin = 3
+ARUCO_PARAMS.adaptiveThreshWinSizeMax = 23
+ARUCO_PARAMS.adaptiveThreshWinSizeStep = 10
+ARUCO_PARAMS.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
 
 # If your OpenCV supports the newer API, use ArucoDetector (preferred).
 HAS_NEW_DETECTOR = hasattr(cv2.aruco, "ArucoDetector")
@@ -32,35 +36,25 @@ class MarkerMeasurement:
 
 def build_kalman() -> cv2.KalmanFilter:
     """
-    State: [x, y, vx, vy]
+    Simple position-only Kalman filter for smoothing.
+    State: [x, y]
     Measurement: [x, y]
     """
-    kf = cv2.KalmanFilter(4, 2)
+    kf = cv2.KalmanFilter(2, 2)
 
-    kf.transitionMatrix = np.array(
-        [
-            [1, 0, 1, 0],
-            [0, 1, 0, 1],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1],
-        ],
-        dtype=np.float32,
-    )
+    # Identity transition - prediction keeps same position
+    kf.transitionMatrix = np.eye(2, dtype=np.float32)
 
-    kf.measurementMatrix = np.array(
-        [
-            [1, 0, 0, 0],
-            [0, 1, 0, 0],
-        ],
-        dtype=np.float32,
-    )
+    # Direct measurement of position
+    kf.measurementMatrix = np.eye(2, dtype=np.float32)
 
-    # Tuning: adjust these if it feels too laggy or too jittery.
-    kf.processNoiseCov = np.eye(4, dtype=np.float32) * 1e-2
-    kf.measurementNoiseCov = np.eye(2, dtype=np.float32) * 5e-1
-    kf.errorCovPost = np.eye(4, dtype=np.float32)
+    # Tuning: low process noise (we trust position doesn't change much)
+    # low measurement noise (we trust measurements)
+    kf.processNoiseCov = np.eye(2, dtype=np.float32) * 1e-3
+    kf.measurementNoiseCov = np.eye(2, dtype=np.float32) * 1e-3
+    kf.errorCovPost = np.eye(2, dtype=np.float32)
 
-    kf.statePost = np.zeros((4, 1), dtype=np.float32)
+    kf.statePost = np.zeros((2, 1), dtype=np.float32)
     return kf
 
 
@@ -92,14 +86,18 @@ def detect_marker(frame: np.ndarray,
                   camera_matrix: np.ndarray,
                   dist_coeffs: np.ndarray) -> Optional[MarkerMeasurement]:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    cv2.imshow("GRAY", gray)
 
     if HAS_NEW_DETECTOR:
         detector = cv2.aruco.ArucoDetector(ARUCO_DICT, ARUCO_PARAMS)
         corners, ids, _ = detector.detectMarkers(gray)
+        dbg = frame.copy()
+        if corners is not None and len(corners) > 0:
+            cv2.aruco.drawDetectedMarkers(dbg, corners, ids)
+        cv2.imshow("DETECTION_DEBUG", dbg)
         print("ids:", ids)
     else:
         corners, ids, _ = cv2.aruco.detectMarkers(gray, ARUCO_DICT, parameters=ARUCO_PARAMS)
-        print("ids:", ids)
 
     if ids is None or len(ids) == 0:
         return None
@@ -150,7 +148,6 @@ def detect_marker(frame: np.ndarray,
     rvec = np.asarray(rvec, dtype=np.float32).reshape(3, 1)
     tvec = np.asarray(tvec, dtype=np.float32).reshape(3, 1)
     tvec_flat = tvec.flatten()
-    print("tvec:", tvec.ravel())
 
     # Marker center pixel
     pts = marker_corners.reshape(4, 2)
@@ -187,9 +184,9 @@ def main() -> None:
         if not ret:
             break
 
-        frame = cv2.flip(frame, 1)
+        # frame = cv2.flip(frame, 1)
 
-        # Predict every frame (gives us a stable "where we think it is")
+        # Always predict first (updates statePre from statePost)
         pred = kf.predict()
         pred_x, pred_y = float(pred[0]), float(pred[1])
 
@@ -198,14 +195,22 @@ def main() -> None:
         if meas is not None:
             cx, cy = meas.center_px
 
+            # Debug: print measurement to verify detection is working
+            print(f"DETECTED: marker at ({cx}, {cy})")
+
             # Use pixel center for Kalman measurement (simple & robust).
             z = np.array([[np.float32(cx)], [np.float32(cy)]], dtype=np.float32)
 
             if not initialized:
-                kf.statePost = np.array([[cx], [cy], [0], [0]], dtype=np.float32)
+                # Initialize filter state to current measurement
+                init_state = np.array([[cx], [cy]], dtype=np.float32)
+                kf.statePost = init_state.copy()
+                kf.statePre = init_state.copy()
                 initialized = True
+                print(f"  -> Initialized Kalman at ({cx}, {cy})")
             else:
                 kf.correct(z)
+                print(f"  -> Corrected, new state=({float(kf.statePost[0]):.1f}, {float(kf.statePost[1]):.1f})")
 
             last_meas = (cx, cy)
 
@@ -221,6 +226,12 @@ def main() -> None:
         # Filtered estimate after correct
         est = kf.statePost
         est_x, est_y = float(est[0]), float(est[1])
+
+        # Debug: show state on frame
+        state_str = f"est=({est_x:.0f},{est_y:.0f}) pred=({pred_x:.0f},{pred_y:.0f})"
+        if last_meas:
+            state_str += f" meas=({last_meas[0]:.0f},{last_meas[1]:.0f})"
+        cv2.putText(frame, state_str, (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
         # Draw points (raw, predicted, filtered)
         if last_meas is not None:

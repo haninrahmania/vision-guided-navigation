@@ -171,3 +171,64 @@ Camera Tracking → Grid Mapping → Navigation Goal
 - Introduced decision-level stability mechanisms to reduce replanning thrash in dynamic target tracking.
 - Added deadzone thresholds, minimum path commitment, cooldown, and replanning rate budget (replans/sec) to produce smoother and more realistic autonomous behavior.
 - Improved robustness when planner temporarily fails (unreachable goals).
+
+## Version 1.2.0 -- ArUco Marker Following (Closed-Loop Control)
+This version introduces a complete **perception → control** pipeline using ArUco marker detection for closed-loop robot following behavior.
+
+### Closed-Loop ArUco Follow Behavior
+
+**Architecture:**
+```
+Webcam Input
+      ↓
+ArUco Detection (cv2.aruco)
+      ↓
+6DoF Pose Estimation (solvePnP)
+      ↓
+FollowController (distance + heading)
+      ↓
+Robot Drive Commands (linear, angular)
+      ↓
+Robot Execution (simulation/abstraction)
+```
+
+### Key Features
+
+1. **ArUco Marker Detection**
+   - Real-time 4x4 ArUco marker detection using OpenCV
+   - Robust corner refinement (subpixel accuracy)
+   - Configurable marker size (default: 5cm)
+
+2. **6DoF Pose Estimation**
+   - Camera-to-marker translation vector (tvec) for distance
+   - Rotation vector (rvec) for orientation
+   - Fallback camera intrinsics for quick setup
+
+3. **FollowController**
+   - **Distance-based control:** Stop when close, forward when far
+   - **Heading correction:** Left/right steering based on marker center offset
+   - **Deadzone handling:** Prevents jitter when centered
+   - **Action states:** SEARCH, FORWARD, TURN LEFT, TURN RIGHT
+
+4. **Robot Drive Abstraction**
+   - Unified drive command interface
+   - Simulated robot interface for testing
+   - Command translation: (linear, angular) → (left_speed, right_speed)
+
+### Achievements
+- Integrated ArUco detection with FollowController
+- Distance-based stop + forward logic working
+- Left/right steering using marker center offset
+- Control output connected to robot drive abstraction
+- Full perception → control loop operational
+
+### Running the ArUco Follower
+```bash
+python -m src.main_follow
+```
+
+### Behavior
+- Robot tracks marker in real-time
+- Maintains target distance (~0.35m default)
+- Centers marker in camera view
+- Stops when marker is lost or at target distance
