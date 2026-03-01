@@ -3,6 +3,7 @@ from __future__ import annotations
 import cv2
 
 from control.controller import FollowController
+from control.smooth_controller import SmoothFollowController
 from hardware.robot_interface import RobotInterface, command_to_drive
 from vision.aruco_tracker import (
     WINDOW,
@@ -24,7 +25,20 @@ def main() -> None:
 
     camera_matrix, dist_coeffs = get_camera_intrinsics_fallback(w, h)
 
-    controller = FollowController(frame_width=w, dead_zone_px=60)
+    # controller = FollowController(frame_width=w, dead_zone_px=60)
+
+    USE_SMOOTH = True
+
+    if USE_SMOOTH:
+        controller = SmoothFollowController(
+            frame_width=w,
+            dead_zone_px=30,
+            z_stop_m=0.20,
+            z_slow_m=0.60,
+        )
+    else:
+        controller = FollowController(frame_width=w, dead_zone_px=60)
+
     robot = RobotInterface()
 
     cv2.namedWindow(WINDOW)

@@ -33,7 +33,7 @@ The navigation system no longer relies on static goals.
 
 Instead:
 - A colored object is tracked using webcam input.
-- The filtered object position becomes the robot’s navigation target.
+- The filtered object position becomes the robot's navigation target.
 - The planner dynamically updates the goal during runtime.
 
 ### Core Integration Concepts
@@ -57,7 +57,7 @@ This allows perception data to directly drive planning.
 
 3. Dynamic A* Replanning
 Whenever the tracked goal changes:
-- Planner resets from robot’s current position.
+- Planner resets from robot's current position.
 - New path is generated.
 - Robot adapts in real time.
 
@@ -172,7 +172,7 @@ Camera Tracking → Grid Mapping → Navigation Goal
 - Added deadzone thresholds, minimum path commitment, cooldown, and replanning rate budget (replans/sec) to produce smoother and more realistic autonomous behavior.
 - Improved robustness when planner temporarily fails (unreachable goals).
 
-## Version 1.2.0 -- ArUco Marker Following (Closed-Loop Control)
+## Version 0.2.0 -- ArUco Marker Following (Closed-Loop Control)
 This version introduces a complete **perception → control** pipeline using ArUco marker detection for closed-loop robot following behavior.
 
 ### Closed-Loop ArUco Follow Behavior
@@ -232,3 +232,49 @@ python -m src.main_follow
 - Maintains target distance (~0.35m default)
 - Centers marker in camera view
 - Stops when marker is lost or at target distance
+
+## Version 0.2.1 -- Smooth Visual Servo Control (P-Control + Slew Limiting)
+
+This update adds a more realistic closed-loop controller for ArUco-guided following, improving stability and "robot-like" motion compared to discrete left/right turning.
+
+### Continuous Steering (P-Control)
+
+Instead of binary "turn left/right" decisions, steering is computed continuously from the marker's horizontal pixel error.
+
+**Parameters:**
+- `cx` = detected marker center in pixels
+- `cx0` = image center (frame_width / 2)
+
+**Error calculation:**
+```
+err_px = cx - cx0
+err_n  = err_px / (frame_width / 2)  # normalized to [-1, +1]
+```
+
+**Angular command (P-controller):**
+```
+ang = clamp(kp * err_n, -max_ang, +max_ang)
+```
+
+This produces smooth turning proportional to how far the marker is from center.
+
+### Speed Scheduling (Alignment + Distance)
+
+Forward speed is automatically reduced when:
+- The robot is turning sharply (misaligned)
+- The robot is close to the target (small Z distance)
+
+This prevents overshoot and creates more controlled approaches.
+
+### Slew-Rate Limiting (Anti-Jitter)
+
+Linear and angular commands are smoothed using a maximum per-frame change limit ("slew").
+
+This reduces twitching caused by small detection noise and makes behavior feel more stable and hardware-ready.
+
+### Outcome
+
+- Smoother and more realistic tracking
+- Less jitter near the centerline
+- Cleaner transitions between SEARCH → TURN → FORWARD → STOP
+- Better foundation for porting to real differential-drive motors (TB6612FNG)
